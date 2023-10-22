@@ -14,9 +14,17 @@
 
 ## GRU的訓練成果
 ![image](https://github.com/Zing-X/Dream-analysis-robot/assets/135576414/a10d490e-859a-427c-b069-66b9dd4edfe2)
+
 ![image](https://github.com/Zing-X/Dream-analysis-robot/assets/135576414/f585086d-e967-40fa-b42f-2df85738335f)
 
 ## Line Bot
 ![image](https://github.com/Zing-X/Dream-analysis-robot/assets/135576414/aa0b61f9-f548-4126-8d37-b7967132ddb3)
+
 ![image](https://github.com/Zing-X/Dream-analysis-robot/assets/135576414/2de3f96d-2db2-48fb-9f55-161c7753f26f)
+
 ![image](https://github.com/Zing-X/Dream-analysis-robot/assets/135576414/cbc82762-89a0-447c-8320-b3e1ece1ed9d)
+
+## Future Work
+- 資料量：PTT和Dcard都有相關的資料可以爬
+- 前處理：jieba、過濾不合格資料
+- 可嘗試使用GPT-2，或其他模型測試
