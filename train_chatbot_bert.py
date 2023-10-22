@@ -1,0 +1,134 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jun 15 12:59:30 2023
+Source Code from TA Sample Code (LSTM)
+@author: Xing Zheng Lin (Try to use bert)
+
+"""
+
+import os
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.keras.layers import Input, LSTM, Dense, Embedding, TimeDistributed
+from tensorflow.keras.models import Model
+from transformers import TFBertModel
+import tensorflow as tf
+
+### Control tensorflow won't occupied all your GPU memory
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+### Configs --> Parameters you can attempt to tuning
+MAXLEN = 256 # If you data has short sentence, please try lower MAXLEN in order to increase performance of model training
+EPOCHS = 100
+BATCH_SIZE = 4
+EMB_DIM = 100
+UNIT = 64
+
+# BERT model
+bert_model = TFBertModel.from_pretrained('bert-base-chinese')
+
+### Build character-based vocabulary
+def tokenize_chinese(texts, voc, voc_ind):
+    for t in tqdm(texts):
+        for ch in str(t):
+            if ch not in voc:
+                voc[ch] = voc_ind
+                voc_ind += 1 
+    return voc, voc_ind
+
+### Convert human language sentence into vocabulary numbers
+### Ex. [I, am, a, dog] --> [226, 543, 78, 98]
+def fit_sentence(sen, voc):
+    res = []
+    for i in sen:
+        res.append(voc[i])
+    return res
+
+### Build chatbot model
+def build_model(voc):
+    Q_in = Input((MAXLEN,), name='Q_input')
+    # Q_emb = Embedding(len(voc) + 1, EMB_DIM, mask_zero=True, name='Q_emb')(Q_in)
+
+    # BERT layer
+    bert_inputs = bert_model([tf.cast(Q_in, tf.int32)])[0]
+    bert_output = TimeDistributed(Dense(UNIT, activation='relu'))(bert_inputs)
+    bert_output = LSTM(UNIT, return_sequences=True, recurrent_dropout=0.2, name='Q_BERT_LSTM_1')(bert_output)
+    bert_output = LSTM(UNIT, return_sequences=True, recurrent_dropout=0.2, name='Q_BERT_LSTM_2')(bert_output)
+
+    A_in = Input((MAXLEN,), name='A_input')
+    A_emb = Embedding(len(voc) + 1, EMB_DIM, mask_zero=True, name='A_emb')(A_in)
+    A_out = LSTM(UNIT, return_sequences=True, recurrent_dropout=0.2, name='A_LSTM')(A_emb, initial_state=[bert_output[:, -1, :], bert_output[:, -1, :]])
+
+    output = Dense(len(voc) + 1, activation='softmax', name='Output')(A_out)
+
+    model = Model(inputs=[Q_in, A_in], outputs=output, name='Gossip_ChatBot')
+    return model
+
+if __name__ == '__main__':
+
+    voc = {} # Vocabulary dictionary
+    voc_ind = 1 # vocabulary index start from 1, index 0 means nothing
+
+    ### Please change data into your own data
+    data = pd.read_csv('./data/data.csv')
+    q = list(data['question'])[:50000]
+    a = list(data['answer'])[:50000]
+
+    ### Build vocabulary --> Evaluate how many characters in your data
+    voc, voc_ind = tokenize_chinese(q, voc, voc_ind)
+    voc, voc_ind = tokenize_chinese(a, voc, voc_ind)
+    
+    ### Insert "Start Of Sentence" token into vocabulary
+    voc["<SOS>"] = len(voc)+1
+    ### Insert "End Of Sentence" token into vocabulary
+    voc["<EOS>"] = len(voc)+1
+
+    ### Convert your sentence into number label and add "<SOS>" at front, "<EOS>" at end
+    q_x = []
+    ans_x, ans_y = [], []
+    ### Question input
+    for i in tqdm(q):
+        res = fit_sentence(i, voc)
+        while len(res) < MAXLEN: ### If sentence is shorter than maxlen, append 0 until length reach maxlen
+            res.append(0)
+        q_x.append(res)
+    ### Answer input
+    for i in tqdm(a):
+        res = fit_sentence(i, voc)
+        res.insert(0,voc["<SOS>"])
+        res.append(voc["<EOS>"])
+        while len(res) < MAXLEN: ### If sentence is shorter than maxlen, append 0 until length reach maxlen
+            res.append(0)
+        ans_x.append(res)
+    ### Answer output
+    for i in ans_x:
+        tmp = i[1:]
+        tmp.append(0)
+        ans_y.append(tmp)
+    
+    ### Turn into np.array for training
+    q_x = np.array(q_x)
+    ans_x = np.array(ans_x)
+    ans_y = np.array(ans_y)
+
+    ### Build model and compile model
+    model = build_model(voc)
+    model.summary()
+    model.compile(loss='sparse_categorical_crossentropy',optimizer='RMSprop',metrics=['accuracy'])
+
+    ### Callbacks --> Checkpoint: Change file path to the directory where you want to save your model
+    checkpoint = ModelCheckpoint(filepath="./models/chatbot_bert.h5", monitor='accuracy',verbose=1,save_best_only=True,save_weights_only=True)
+    ### Callbacks --> Earlystop: Monitor accuracy and decide whether to stop the training procedure
+    earlystop = EarlyStopping(monitor='accuracy',patience=10,verbose=1)
+
+    ### If you have model trained before, you can load it back and continue previous training procedure
+    try:
+        model.load_weights('./models/chatbot_bert.h5')
+        print("Load model...")
+    ### If you haven't train any model yet, train model from initial
+    except:
+        print("Fail to load model...")
+
+    ### Train your model
+    model.fit((q_x, ans_x), ans_y, batch_size=BATCH_SIZE,epochs=EPOCHS,callbacks=[checkpoint, earlystop],verbose=1)
